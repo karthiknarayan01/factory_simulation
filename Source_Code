@@ -1,0 +1,703 @@
+	#include <iostream>
+	
+	#include <atomic>
+	
+	#include <condition_variable>
+	
+	#include <thread>
+	
+	#include <chrono>
+	
+	#include <cstdlib>
+	
+	#include <ctime>
+	
+	#include <vector>
+	
+	#include <fstream>
+	
+	using namespace std;
+	
+	class FactoryWorker {
+	
+	  public:
+	    ~FactoryWorker() {
+	      fptr.close();
+	    }
+	  FactoryWorker() {
+	
+	    fptr.open("log.txt");
+	
+	    constantProductOwnerData = {
+	      {
+	        true,
+	        true,
+	        true,
+	        false
+	      },
+	      {
+	        true,
+	        true,
+	        false,
+	        true
+	      },
+	      {
+	        true,
+	        false,
+	        true,
+	        true
+	      },
+	      {
+	        false,
+	        true,
+	        true,
+	        true
+	      }
+	    };
+	
+	  }
+	
+	  int getTotalCompletedProducts() {
+	    return totalcompletedproducts;
+	  }
+	
+	  void ProductWorker(int id) {
+	
+	    int part1, part2, part3, part4, copypart1, copypart2, copypart3, copypart4, index;
+	
+	    FactoryWorker * tempFW = this;
+	
+	    for (int i = 0; i < 5; i++) {
+	
+	      randomPickupOrderGeneration(part1, part2, part3, part4, index);
+	
+	      copypart1 = part1;
+	      copypart2 = part2;
+	      copypart3 = part3;
+	      copypart4 = part4;
+	
+	      {
+	        unique_lock < mutex > bufLock(bufMutex);
+	
+			// as soon as the new order is created, check whether you can update buffer and do the same.
+	
+	        fptr << "Current Time : " << std::chrono::duration_cast < std::chrono::microseconds > (chrono::system_clock::now() - starttime).count() << "\n";
+	
+	              fptr << "Product Worker Id : " << id << "\n";
+	
+	              fptr << "Iteration : " << i << "\n";
+	
+	              fptr << "Status : " << "New Pickup Order" << "\n";
+	
+	              fptr << "Accumulated Wait Time: 0us" << "\n";
+	
+	              fptr << "Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Pickup Order: ( " << part1 << ", " << part2 << ", " << part3 << ", " << part4 << ")\n";
+	
+	              if (part1 > 0 && bufStateA > 0) {
+	
+	                if (bufStateA >= part1) {
+	                  bufStateA -= part1;
+	                  part1 = 0;
+	                } else {
+	
+	                  part1 -= bufStateA;
+	                  bufStateA = 0;
+	
+	                }
+	
+	              }
+	
+	              if (part2 > 0 && bufStateB > 0) {
+	
+	                if (bufStateB >= part2) {
+	                  bufStateB -= part2;
+	                  part2 = 0;
+	                } else {
+	
+	                  part2 -= bufStateB;
+	                  bufStateB = 0;
+	
+	                }
+	
+	              }
+	
+	              if (part3 > 0 && bufStateC > 0) {
+	
+	                if (bufStateC >= part3) {
+	                  bufStateC -= part3;
+	                  part3 = 0;
+	                } else {
+	
+	                  part3 -= bufStateC;
+	                  bufStateC = 0;
+	
+	                }
+	
+	              }
+	
+	              if (part4 > 0 && bufStateD > 0) {
+	
+	                if (bufStateD >= part4) {
+	                  bufStateD -= part4;
+	                  part4 = 0;
+	                } else {
+	
+	                  part4 -= bufStateD;
+	                  bufStateD = 0;
+	
+	                }
+	
+	              }
+	
+	              fptr << "Updated Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Updated pickup Order: ( " << part1 << ", " << part2 << ", " << part3 << ", " << part4 << ")\n";
+	
+	              fptr << "\n\n";
+	              
+	              // notify part workers irrespective of whether any part is acquired or not.
+	              loadCV.notify_all();
+	
+	
+	        chrono::system_clock::time_point waitperiod = chrono::system_clock::now() + chrono::microseconds(6000);
+	
+	        chrono::system_clock::time_point startingpoint = chrono::system_clock::now();
+	
+	        // loop until either timeout or all parts are obtained from buffer
+	        while (chrono::system_clock::now() < waitperiod && (part1 > 0 || part2 > 0 || part3 > 0 || part4 > 0)) {
+	
+	// condition for a wakeup is that, if there is some part which needs to be picked up and there is parts available in buffer for that part then wakeup and partially of completely fulfil the requirement.
+	          if (pickupCV.wait_until(bufLock, waitperiod, [part1, part2, part3, part4, tempFW]() {
+	              return (tempFW -> bufStateA > 0 && part1 > 0) || (tempFW -> bufStateB > 0 && part2 > 0) || (tempFW -> bufStateC > 0 && part3 > 0) || (tempFW -> bufStateD > 0 && part4 > 0);
+	            })) {
+	
+	             if (chrono::duration_cast < std::chrono::microseconds > (waitperiod - chrono::system_clock::now()).count() >= 0) {
+	
+	              fptr << "Current Time : " << std::chrono::duration_cast < std::chrono::microseconds > (chrono::system_clock::now() - starttime).count() << "\n";
+	
+	              fptr << "Product Worker Id : " << id << "\n";
+	
+	              fptr << "Iteration : " << i << "\n";
+	
+	              fptr << "Status : " << "wakeup-notified" << "\n";
+	
+	              fptr << "Accumulated Wait Time: " << std::chrono::duration_cast < std::chrono::microseconds > (chrono::system_clock::now() - startingpoint).count() << "\n";
+	
+	              fptr << "Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Pickup Order: ( " << part1 << ", " << part2 << ", " << part3 << ", " << part4 << ")\n";
+	
+	              if (part1 > 0 && bufStateA > 0) {
+	
+	                if (bufStateA >= part1) {
+	                  bufStateA -= part1;
+	                  part1 = 0;
+	                } else {
+	
+	                  part1 -= bufStateA;
+	                  bufStateA = 0;
+	
+	                }
+	
+	              }
+	
+	              if (part2 > 0 && bufStateB > 0) {
+	
+	                if (bufStateB >= part2) {
+	                  bufStateB -= part2;
+	                  part2 = 0;
+	                } else {
+	
+	                  part2 -= bufStateB;
+	                  bufStateB = 0;
+	
+	                }
+	
+	              }
+	
+	              if (part3 > 0 && bufStateC > 0) {
+	
+	                if (bufStateC >= part3) {
+	                  bufStateC -= part3;
+	                  part3 = 0;
+	                } else {
+	
+	                  part3 -= bufStateC;
+	                  bufStateC = 0;
+	
+	                }
+	
+	              }
+	
+	              if (part4 > 0 && bufStateD > 0) {
+	
+	                if (bufStateD >= part4) {
+	                  bufStateD -= part4;
+	                  part4 = 0;
+	                } else {
+	
+	                  part4 -= bufStateD;
+	                  bufStateD = 0;
+	
+	                }
+	
+	              }
+	
+	              fptr << "Updated Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Updated pickup Order: ( " << part1 << ", " << part2 << ", " << part3 << ", " << part4 << ")\n";
+	
+	              fptr << "\n\n";
+	
+	            } //second if ends here
+	            else {
+	
+	              
+				// if the timeout has already occured then dont release the mutex again waiting for notification, just break and then check if you can completely fulfil the demands and then write the wakeup-timeout entry into the log
+	              break;
+	
+	              
+	
+	            } // third if ends here
+	
+	            loadCV.notify_all();
+	
+	          } //if ends here
+	
+	        } //while loop ends here
+	
+	        fptr << "Current Time : " << std::chrono::duration_cast < std::chrono::microseconds > (chrono::system_clock::now() - starttime).count() << "\n";
+	
+	              fptr << "Product Worker Id : " << id << "\n";
+	
+	              fptr << "Iteration : " << i << "\n";
+	
+	              fptr << "Status : " << "wakeup-timeout" << "\n";
+	
+	              fptr << "Accumulated Wait Time: " << std::chrono::duration_cast < std::chrono::microseconds > (chrono::system_clock::now() - startingpoint).count() << "\n";
+	
+	              fptr << "Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Pickup Order: ( " << part1 << ", " << part2 << ", " << part3 << ", " << part4 << ")\n";
+	
+	              if (!((part1 > 0 && bufStateA - part1 < 0) || (part2 > 0 && bufStateB - part2 < 0) || (part3 > 0 && bufStateC - part3 < 0) || (part4 > 0 && bufStateD - part4 < 0))) {
+	
+	                bufStateA -= part1;
+	                bufStateB -= part2;
+	                bufStateC -= part3;
+	                bufStateD -= part4;
+	
+	                part1 = part2 = part3 = part4 = 0;
+	
+	              }
+	
+	              fptr << "Updated Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Updated pickup Order: ( " << part1 << ", " << part2 << ", " << part3 << ", " << part4 << ")\n";
+	
+	              
+	
+	        if (part1 == 0 && part2 == 0 && part3 == 0 && part4 == 0)
+	        {
+	          totalcompletedproducts += 1;
+	        }
+	
+	          fptr << "Total Completed Products : " << totalcompletedproducts << "\n";
+	
+	          fptr << "\n\n";
+	
+	          loadCV.notify_all();
+	
+	      } //critical section ends here
+			
+		  // time required to discard parts. number of parts collected would be copypart - part
+		  if(part1 != 0 || part2 != 0 || part3 != 0 || part4 != 0)
+			this_thread::sleep_for(chrono::microseconds((copypart1 - part1) * 20 + (copypart2 - part2) * 30 + (copypart3 - part3) * 40 + (copypart4 - part4) * 50));
+	
+	      // manufacture the product only when you have all the necessary parts
+	      if (part1 == 0 && part2 == 0 && part3 == 0 && part4 == 0) {
+	        // time to move the parts to assembly
+	        this_thread::sleep_for(chrono::microseconds(copypart1 * 20 + copypart2 * 30 + copypart3 * 40 + copypart4 * 50));
+	        // time to manufacture the product
+	        this_thread::sleep_for(chrono::microseconds(copypart1 * 80 + copypart2 * 100 + copypart3 * 120 + copypart4 * 140));
+	
+	      }
+	    } // for loop ends here
+	
+	  }
+	
+	  void PartWorker(int id) {
+	
+	    int a, b, c, d;
+	
+	    FactoryWorker * tempFW = this;
+	
+	    for (int i = 0; i < 5; i++) {
+	
+	      // call this function to generate a new load order
+	      randomLoadOrderGeneration(a, b, c, d);
+	
+	      // time to manufacture parts
+	      this_thread::sleep_for(chrono::microseconds(a * 50 + b * 70 + c * 90 + d * 110));
+	
+	      // time to move the load order to buffer area
+	      this_thread::sleep_for(chrono::microseconds(a * 20 + b * 30 + c * 40 + d * 50));
+	
+	      // critical section where a shared resource i.e. the buffer will be used
+	      {
+	
+	        unique_lock < mutex > bufLock(bufMutex);
+	
+	        fptr << "Current Time : " << std::chrono::duration_cast < std::chrono::microseconds > (chrono::system_clock::now() - starttime).count() << "\n";
+	
+	              fptr << "Part Worker Id : " << id << "\n";
+	
+	              fptr << "Iteration : " << i << "\n";
+	
+	              fptr << "Status : " << "New Load Order" << "\n";
+	
+	              fptr << "Accumulated Wait Time: 0us" << "\n";
+	
+	              fptr << "Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Load Order: ( " << a << ", " << b << ", " << c << ", " << d << ")\n";
+	
+	              if (bufCapacityA > bufStateA && a > 0) {
+	                if (bufCapacityA - bufStateA > a) {
+	                  bufStateA += a;
+	                  a = 0;
+	                } else {
+	
+	                  a = a - (bufCapacityA - bufStateA);
+	                  bufStateA = bufCapacityA;
+	
+	                }
+	              }
+	
+	              if (bufCapacityB > bufStateB && b > 0) {
+	                if (bufCapacityB - bufStateB > b) {
+	                  bufStateB += b;
+	                  b = 0;
+	                } else {
+	
+	                  b = b - (bufCapacityB - bufStateB);
+	                  bufStateB = bufCapacityB;
+	
+	                }
+	              }
+	
+	              if (bufCapacityC > bufStateC && c > 0) {
+	
+	                if (bufCapacityC - bufStateC > c) {
+	                  bufStateC += c;
+	                  c = 0;
+	                } else {
+	
+	                  c = c - (bufCapacityC - bufStateC);
+	                  bufStateC = bufCapacityC;
+	
+	                }
+	              }
+	
+	              if (bufCapacityD > bufStateD && d > 0) {
+	                if (bufCapacityD - bufStateD > d) {
+	                  bufStateD += d;
+	                  d = 0;
+	                } else {
+	
+	                  d = d - (bufCapacityD - bufStateD);
+	                  bufStateD = bufCapacityD;
+	
+	                }
+	              }
+	
+	              fptr << "Updated Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Updated Load Order: ( " << a << ", " << b << ", " << c << ", " << d << ")\n";
+	
+	              fptr << "\n\n";
+	
+	        // these are used to make Accumulated wait time entry in log
+	        chrono::system_clock::time_point waitperiod = chrono::system_clock::now() + chrono::microseconds(3000);
+	
+	        chrono::system_clock::time_point startingpoint = chrono::system_clock::now();
+	        
+	        pickupCV.notify_all();
+	
+	        while ((a > 0 || b > 0 || c > 0 || d > 0) && chrono::system_clock::now() < waitperiod) {
+	
+	          if (loadCV.wait_until(bufLock, waitperiod, [a, b, c, d, tempFW]() {
+	              return (tempFW -> bufStateA < tempFW -> bufCapacityA && a > 0) || (tempFW -> bufStateB < tempFW -> bufCapacityB && b > 0) || (tempFW -> bufStateC < tempFW -> bufCapacityC && c > 0) || (tempFW -> bufStateD < tempFW -> bufCapacityD && d > 0);
+	            })) {
+	
+	            
+	            
+	             if (chrono::duration_cast < std::chrono::microseconds > (waitperiod - chrono::system_clock::now()).count() >= 0) {
+	
+	              fptr << "Current Time : " << std::chrono::duration_cast < std::chrono::microseconds > (chrono::system_clock::now() - starttime).count() << "\n";
+	
+	              fptr << "Part Worker Id : " << id << "\n";
+	
+	              fptr << "Iteration : " << i << "\n";
+	
+	              fptr << "Status : " << "wakeup-notified" << "\n";
+	
+	              fptr << "Accumulated Wait Time: " << std::chrono::duration_cast < std::chrono::microseconds > (chrono::system_clock::now() - startingpoint).count() << "\n";
+	
+	              fptr << "Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Load Order: ( " << a << ", " << b << ", " << c << ", " << d << ")\n";
+	
+	              if (bufCapacityA > bufStateA && a > 0) {
+	                if (bufCapacityA - bufStateA > a) {
+	                  bufStateA += a;
+	                  a = 0;
+	                } else {
+	
+	                  a = a - (bufCapacityA - bufStateA);
+	                  bufStateA = bufCapacityA;
+	
+	                }
+	              }
+	
+	              if (bufCapacityB > bufStateB && b > 0) {
+	                if (bufCapacityB - bufStateB > b) {
+	                  bufStateB += b;
+	                  b = 0;
+	                } else {
+	
+	                  b = b - (bufCapacityB - bufStateB);
+	                  bufStateB = bufCapacityB;
+	
+	                }
+	              }
+	
+	              if (bufCapacityC > bufStateC && c > 0) {
+	
+	                if (bufCapacityC - bufStateC > c) {
+	                  bufStateC += c;
+	                  c = 0;
+	                } else {
+	
+	                  c = c - (bufCapacityC - bufStateC);
+	                  bufStateC = bufCapacityC;
+	
+	                }
+	              }
+	
+	              if (bufCapacityD > bufStateD && d > 0) {
+	                if (bufCapacityD - bufStateD > d) {
+	                  bufStateD += d;
+	                  d = 0;
+	                } else {
+	
+	                  d = d - (bufCapacityD - bufStateD);
+	                  bufStateD = bufCapacityD;
+	
+	                }
+	              }
+	
+	              fptr << "Updated Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Updated Load Order: ( " << a << ", " << b << ", " << c << ", " << d << ")\n";
+	
+	              fptr << "\n\n";
+	
+	            } else {
+	
+	              
+	
+	              break;
+	
+	              
+	
+	            }
+	
+	            pickupCV.notify_all();
+	          }
+	
+	        } // while loop ends here
+	        
+	        
+	
+	        fptr << "Current Time : " << std::chrono::duration_cast < std::chrono::microseconds > (chrono::system_clock::now() - starttime).count() << "\n";
+	
+	              fptr << "Part Worker Id : " << id << "\n";
+	
+	              fptr << "Iteration : " << i << "\n";
+	
+	              fptr << "Status : " << "wakeup-timeout" << "\n";
+	
+	              fptr << "Accumulated Wait Time: " << std::chrono::duration_cast < std::chrono::microseconds > (chrono::system_clock::now() - startingpoint).count() << "\n";
+	
+	              fptr << "Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Load Order: ( " << a << ", " << b << ", " << c << ", " << d << ")\n";
+	
+	              if (!((a > 0 && bufStateA + a > bufCapacityA) || (b > 0 && bufStateB + b > bufCapacityB) || (c > 0 && bufStateC + c > bufCapacityC) || (d > 0 && bufStateD + d > bufCapacityD))) {
+	                bufStateA += a;
+	                bufStateB += b;
+	                bufStateC += c;
+	                bufStateD += d;
+	
+	                a = b = c = d = 0;
+	              }
+	
+	              fptr << "Updated Buffer State: ( " << bufStateA << ", " << bufStateB << ", " << bufStateC << ", " << bufStateD << ")\n";
+	
+	              fptr << "Updated Load Order: ( " << a << ", " << b << ", " << c << ", " << d << ")\n";
+	
+	              fptr << "\n\n";
+	             
+	
+	              pickupCV.notify_all();
+	
+	      } // critical section ends here
+	
+	      // time to discard parts
+	
+	      this_thread::sleep_for(chrono::microseconds(a * 20 + b * 30 + c * 40 + d * 50));
+	
+	    } //for loop ends here
+	
+	  }
+	
+	  private:
+	    // In order to update the buffer a process need to own bufMutex
+	    mutex bufMutex;
+	
+	  // variables to hold buffer state and buffer capacity
+	  int bufStateA = 0, bufCapacityA = 6, bufStateB = 0, bufCapacityB = 5, bufStateC = 0, bufCapacityC = 4, bufStateD = 0, bufCapacityD = 3;
+	
+	  // condition variables used to notify processes about availability of parts or capacity to fill the buffer for part workers
+	  condition_variable loadCV, pickupCV;
+	
+	  // file pointer to log.txt
+	  ofstream fptr;
+	
+	  // variable to keep track of the program start time - Used to print the current time spent in the log
+	  chrono::system_clock::time_point starttime = chrono::system_clock::now();
+	
+	  // total completed products by product workers
+	  int totalcompletedproducts = 0;
+	
+	  // product workers need only 3 parts to manufacture their product. This variable holds the options for those 3 parts. There are 4 options i.e. (part1,part2,part3), (part1,part2,part4), (part1,part3,part4), (part2,part3,part4). This option is randomnly choosen
+	  vector < vector < bool > > constantProductOwnerData;
+	
+	  unsigned int seed = time(NULL);
+	
+	  // function to generate random load order for a part worker
+	  void randomLoadOrderGeneration(int & a, int & b, int & c, int & d) {
+	
+	    srand(seed++);
+	
+	    a = rand() % 5;
+	    // part A can take any value from 0 to 5 and if it has taken 4 then others need to be 0 since the total parts that a part worker can produce = 4
+	    if (a == 4) {
+	      b = c = d = 0;
+	      return;
+	    }
+	
+	    // Once parta is done partb can take any value from 0 to 4-a
+	    b = rand() % (5 - a);
+	
+	    if (a + b == 4) {
+	      c = d = 0;
+	      return;
+	    }
+	
+	    // partc can take any value from 0 to 4 - (parta + partb)
+	
+	    c = rand() % (5 - a - b);
+	
+	    // once parta, partb and partc are selected, partd will take up the remaining parts
+	    d = 4 - (a + b + c);
+	
+	  }
+	
+	  void randomPickupOrderGeneration(int & part1, int & part2, int & part3, int & part4, int & index) {
+	
+	    srand(seed++);
+	
+	    // randomnly choose which 3 parts will be used to manufacture product
+	    index = rand() % 4;
+	
+	    part1 = part2 = part3 = part4 = 0;
+	
+	    // part1 can have any value between 1 and 3
+	    if (constantProductOwnerData[index][0])
+	      part1 = rand() % 3 + 1;
+	
+	    if (constantProductOwnerData[index][1]) {
+	
+	      // part2 can take any value between 1 and  5 - part1 - 1
+	
+	      if (part1 == 0)
+	        part2 = rand() % 3 + 1;
+	
+	      else
+	        part2 = rand() % (5 - part1 - 1) + 1;
+	
+	    }
+	
+	    if (constantProductOwnerData[index][2]) {
+	
+	      if (part1 > 0 && part2 > 0)
+	        part3 = 5 - part1 - part2;
+	      else
+	        part3 = rand() % (5 - part1 - part2 - 1) + 1;
+	
+	    }
+	
+	    if (constantProductOwnerData[index][3]) {
+	
+	      part4 = 5 - part1 - part2 - part3;
+	
+	    }
+	
+	  }
+	
+	};
+	
+	void partworkerfunction(FactoryWorker& fw,int id){
+			fw.PartWorker(id);
+	}
+	
+	void productworkerfunction(FactoryWorker& fw, int id){
+			fw.ProductWorker(id);
+	}
+	
+	int main() {
+	  const int m = 20,
+	    n = 16; //m: number of Part Workers
+	  //n: number of Product Workers
+	  //m>n
+	
+	  FactoryWorker fw;
+	
+	  thread partW[m];
+	  thread prodW[n];
+	  for (int i = 0; i < n; i++) {
+	    partW[i] = thread( partworkerfunction, ref(fw), i);
+	    prodW[i] = thread( productworkerfunction, ref(fw), i);
+	  }
+	  for (int i = n; i < m; i++) {
+	    partW[i] = thread( partworkerfunction, ref(fw), i);
+	  }
+	  /* Join the threads to the main threads */
+	  for (int i = 0; i < n; i++) {
+	    partW[i].join();
+	    prodW[i].join();
+	  }
+	  for (int i = n; i < m; i++) {
+	    partW[i].join();
+	  }
+	
+	  cout << "Total Completed Products : " << fw.getTotalCompletedProducts() << "\n";
+	  cout << "Finish!" << endl;
+	
+	  return 0;
+	}
+	
